@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParkIQ — Smart Corporate Parking</title>
+  <meta name="description"
+    content="Intelligent corporate parking management platform with real-time allocation, waitlist, and analytics.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="bg-orb bg-orb-1"></div>
+  <div class="bg-orb bg-orb-2"></div>
+  <div class="bg-orb bg-orb-3"></div>
+
+  <div id="app">
+    <!-- ── Top Navigation ── -->
+    <nav class="topnav">
+      <div class="topnav-brand">
+        <div class="topnav-logo">🅿️</div>
+        <div>
+          <div class="topnav-title">ParkIQ</div>
+          <div class="topnav-subtitle">Smart Corporate Parking</div>
+        </div>
+      </div>
+
+      <div class="nav-tabs" id="mainTabs">
+        <button class="nav-tab active" data-view="employee">👤 Employee</button>
+        <button class="nav-tab" data-view="booking">📅 Book</button>
+        <button class="nav-tab" data-view="checkin">✅ Check-In</button>
+        <button class="nav-tab" data-view="waitlist">⏳ Waitlist</button>
+        <button class="nav-tab" data-view="admin">🛠️ Admin</button>
+        <button class="nav-tab" data-view="analytics">📊 Analytics</button>
+      </div>
+
+      <div class="topnav-user">
+        <select class="user-selector" id="userSelector" onchange="switchUser(this.value)">
+          <!-- populated by JS -->
+        </select>
+        <div class="notif-btn" onclick="openNotifPanel()" title="Notifications">
+          🔔
+          <span class="notif-badge" id="notifBadge">0</span>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ── Main Content ── -->
+    <div class="main-content">
+
+      <!-- ──────────────────────── EMPLOYEE VIEW ──────────────────────── -->
+      <div class="view active" id="view-employee">
+        <div class="page-header flex-between">
+          <div>
+            <h1 class="page-title">Good morning, <span id="empName">Alex</span> 👋</h1>
+            <p class="page-subtitle" id="todayDate"></p>
+          </div>
+          <div id="empStatusBadge"></div>
+        </div>
+
+        <div class="grid-4 mb-16" id="empStatCards"></div>
+
+        <div class="grid-2">
+          <!-- Today's Status Card -->
+          <div class="card" id="todayStatusCard">
+            <div class="card-header">
+              <span class="card-title">Today's Parking</span>
+              <span class="card-icon">🅿️</span>
+            </div>
+            <div id="todayStatusContent"></div>
+          </div>
+
+          <!-- Quick Actions -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Quick Actions</span>
+              <span class="card-icon">⚡</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <button class="btn btn-primary w-full" onclick="switchView('booking')">📅 Book a Spot</button>
+              <button class="btn btn-ghost w-full" id="carpoolBtn" onclick="openCarpoolModal()">🚗 Register
+                Carpool</button>
+              <button class="btn btn-ghost w-full" id="middayExitBtn" onclick="openMiddayModal()">🚶 Midday
+                Exit</button>
+              <button class="btn btn-warn w-full" id="graceExtBtn" onclick="requestGraceExtension()">⏱️ Request Grace
+                Extension</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Penalty Status -->
+        <div class="card mt-16" id="penaltyCard">
+          <div class="card-header">
+            <span class="card-title">No-Show Record</span>
+            <span class="card-icon">⚠️</span>
+          </div>
+          <div id="penaltyContent"></div>
+        </div>
+
+        <!-- Offer Banner (hidden by default) -->
+        <div class="offer-banner hidden mt-16" id="offerBanner">
+          <div style="font-size:32px">🎉</div>
+          <div style="flex:1">
+            <strong style="display:block;font-size:16px;margin-bottom:4px">Parking Spot Available!</strong>
+            <p style="font-size:13px;color:var(--text-secondary)" id="offerText">Spot #12 is available. You have <span
+                id="offerCountdown" class="bold" style="color:var(--accent-yellow)">10:00</span> to accept.</p>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button class="btn btn-success" onclick="acceptOffer()">Accept ✓</button>
+            <button class="btn btn-ghost" onclick="declineOffer()">Decline</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── BOOKING VIEW ──────────────────────── -->
+      <div class="view" id="view-booking">
+        <div class="page-header">
+          <h1 class="page-title">Book a <span>Parking Spot</span></h1>
+          <p class="page-subtitle">Submit your daily parking request. Bookings open evening before and close at 8:00 AM.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Booking Form</span>
+              <span class="card-icon">📝</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Select Date</label>
+              <input type="date" class="form-input" id="bookingDate">
+              <p class="form-help">You may book up to 5 days in advance.</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Expected Arrival Time</label>
+              <select class="form-select" id="bookingTime">
+                <option value="07:00">🌅 7:00 AM – Early Bird</option>
+                <option value="08:00">🌞 8:00 AM – Standard</option>
+                <option value="08:30" selected>🕗 8:30 AM – Standard</option>
+                <option value="09:00">☀️ 9:00 AM – Flexible</option>
+                <option value="09:30">⏰ 9:30 AM – Late Arrival</option>
+                <option value="10:00">🕙 10:00 AM – Remote First Half</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Carpool Partners (optional)</label>
+              <div style="display:flex;gap:8px;">
+                <select class="form-select" id="carpoolSelect" style="flex:1">
+                  <option value="">Select colleague...</option>
+                </select>
+                <button class="btn btn-ghost" onclick="addCarpoolTag()" style="white-space:nowrap">+ Add</button>
+              </div>
+              <div id="carpoolTags" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;"></div>
+              <p class="form-help">Adding carpoolers boosts your priority score by +3.0 pts each.</p>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Special Notes</label>
+              <textarea class="form-textarea" id="bookingNotes"
+                placeholder="e.g. Disability access required, EV charging needed..."></textarea>
+            </div>
+
+            <div id="bookingWindowAlert" class="hidden"
+              style="padding:12px 16px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);border-radius:var(--radius-md);font-size:13px;color:var(--accent-yellow);margin-bottom:16px">
+            </div>
+
+            <button class="btn btn-primary w-full" id="submitBookingBtn" onclick="submitBooking()"
+              style="font-size:16px;padding:14px">
+              🅿️ Submit Booking Request
+            </button>
+          </div>
+
+          <div>
+            <!-- Availability Preview -->
+            <div class="card mb-16" id="availabilityCard">
+              <div class="card-header">
+                <span class="card-title">Today's Availability</span>
+                <div class="dot-live" title="Live"></div>
+              </div>
+              <div id="availPreview"></div>
+            </div>
+
+            <!-- Your Priority Score -->
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Your Priority Score</span>
+                <span class="card-icon">🎯</span>
+              </div>
+              <div id="priorityBreakdown"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── CHECK-IN VIEW ──────────────────────── -->
+      <div class="view" id="view-checkin">
+        <div class="page-header">
+          <h1 class="page-title">Check-<span>In</span></h1>
+          <p class="page-subtitle">Confirm your arrival to activate your reserved parking spot.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="card" id="checkinCard">
+            <div id="checkinContent"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Verification Methods</span>
+              <span class="card-icon">📍</span>
+            </div>
+            <div id="verifyMethodContent">
+              <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+                <label class="toggle-wrap" onclick="toggleGeo()">
+                  <div class="toggle on" id="geoToggle"></div>
+                  <span class="toggle-label">📡 GPS Geofencing</span>
+                </label>
+                <p class="text-xs" style="padding-left:54px">Must be within 500m of parking facility.</p>
+                <label class="toggle-wrap" onclick="toggleQR()">
+                  <div class="toggle" id="qrToggle"></div>
+                  <span class="toggle-label">📷 QR Code Scan</span>
+                </label>
+                <p class="text-xs" style="padding-left:54px">Scan the QR code placed at your spot.</p>
+              </div>
+              <div class="divider"></div>
+              <div id="geoStatus"
+                style="padding:12px;background:var(--bg-glass);border-radius:var(--radius-md);border:1px solid var(--border);font-size:13px;margin-bottom:12px">
+                📡 <strong>Geo Status:</strong> <span id="geoStatusText" style="color:var(--text-secondary)">Not
+                  verified yet</span>
+              </div>
+              <button class="btn btn-ghost w-full" onclick="simulateGeoCheck()">Simulate Geo-Fence Check</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── WAITLIST VIEW ──────────────────────── -->
+      <div class="view" id="view-waitlist">
+        <div class="page-header flex-between">
+          <div>
+            <h1 class="page-title">Waitlist <span>Queue</span></h1>
+            <p class="page-subtitle">Real-time view of the parking waitlist. You'll be notified instantly when a spot
+              opens.</p>
+          </div>
+          <button class="btn btn-ghost" onclick="simulateSpotRelease()">⚡ Simulate Release</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Current Queue</span>
+              <div class="dot-live"></div>
+            </div>
+            <div id="waitlistQueue"></div>
+          </div>
+
+          <div>
+            <div class="card mb-16">
+              <div class="card-header">
+                <span class="card-title">My Queue Position</span>
+                <span class="card-icon">📍</span>
+              </div>
+              <div id="myQueueStatus"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">Queue Algorithm</span>
+                <span class="card-icon">🧮</span>
+              </div>
+              <div style="font-size:13px;color:var(--text-secondary);line-height:1.7">
+                <p
+                  style="font-family:monospace;background:var(--bg-glass);padding:10px 14px;border-radius:var(--radius-sm);border:1px solid var(--border);font-size:12px;margin-bottom:12px;color:var(--accent-cyan)">
+                  P(u) = w₁·O<sub>tier</sub> + w₂·C<sub>carpool</sub><br>
+                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;- w₃·N<sub>noshows</sub> + w₄·W<sub>history</sub>
+                </p>
+                <div class="info-row"><span class="label">w₁ (Org Tier)</span><span class="value bold"
+                    style="color:var(--accent-cyan)">×1.0</span></div>
+                <div class="info-row"><span class="label">w₂ (Carpool Bonus)</span><span class="value bold"
+                    style="color:var(--accent-green)">+3.0</span></div>
+                <div class="info-row"><span class="label">w₃ (No-Show Penalty)</span><span class="value bold"
+                    style="color:var(--accent-red)">×2.5</span></div>
+                <div class="info-row"><span class="label">w₄ (Wait History)</span><span class="value bold"
+                    style="color:var(--accent-yellow)">×0.8</span></div>
+                <div class="info-row"><span class="label">Offer Window</span><span class="value">10 min</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── ADMIN VIEW ──────────────────────── -->
+      <div class="view" id="view-admin">
+        <div class="page-header">
+          <h1 class="page-title">Admin <span>Dashboard</span></h1>
+          <p class="page-subtitle">Manage capacity, configure rules, and oversee all parking operations.</p>
+        </div>
+
+        <div class="grid-4 mb-16" id="adminStatCards"></div>
+
+        <div class="grid-2">
+          <!-- Capacity Management -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Capacity Management</span>
+              <span class="card-icon">🏗️</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Total Available Spots: <strong id="capacityDisplay"
+                  style="color:var(--accent-cyan)">30</strong></label>
+              <input type="range" class="range-slider" id="capacitySlider" min="1" max="60" value="30"
+                oninput="updateCapacity(this.value)">
+              <div class="flex-between mt-8 text-xs"><span>1</span><span>60 max</span></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Reserved for VIP/Guests</label>
+              <input type="number" class="form-input" id="vipSpots" value="3" min="0" max="10"
+                onchange="updateVIPSpots(this.value)">
+              <p class="form-help">These spots are invisible to regular employees.</p>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Carpool-Priority Spots</label>
+              <input type="number" class="form-input" id="carpoolSpots" value="5" min="0" max="20"
+                onchange="updateCarpoolSpots(this.value)">
+              <p class="form-help">Nearest-to-elevator spots reserved for verified carpools.</p>
+            </div>
+            <button class="btn btn-primary w-full mt-8" onclick="applyCapacityChanges()">💾 Apply Changes</button>
+          </div>
+
+          <!-- Rules Engine -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Rules Engine</span>
+              <span class="card-icon">⚙️</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Grace Period (minutes)</label>
+              <input type="number" class="form-input" id="gracePeriod" value="20" min="5" max="60"
+                onchange="updateGracePeriod(this.value)">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Booking Window Opens</label>
+              <input type="time" class="form-input" id="bookingOpenTime" value="18:00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Booking Window Closes</label>
+              <input type="time" class="form-input" id="bookingCloseTime" value="08:00">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Midday Exit Max Duration (hours)</label>
+              <input type="number" class="form-input" id="middayMax" value="3" min="1" max="6"
+                onchange="updateMiddayMax(this.value)">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Offer Acceptance Window (minutes)</label>
+              <input type="number" class="form-input" id="offerWindow" value="10" min="3" max="30">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Traffic Extension (min, 1/day limit)</label>
+              <input type="number" class="form-input" id="trafficExtension" value="15" min="5" max="30">
+            </div>
+            <button class="btn btn-success w-full mt-8" onclick="saveRules()">✅ Save Rules</button>
+          </div>
+        </div>
+
+        <!-- Live Spot Grid -->
+        <div class="card mt-16">
+          <div class="card-header">
+            <span class="card-title">Live Spot Map</span>
+            <div class="flex gap-8">
+              <span class="badge badge-available">🟢 Available</span>
+              <span class="badge badge-reserved">🔵 Reserved</span>
+              <span class="badge badge-occupied">🔴 Occupied</span>
+              <span class="badge badge-carpool">🟣 Carpool</span>
+              <span class="badge badge-temp">🟡 Temp Away</span>
+            </div>
+          </div>
+          <div class="spot-grid" id="adminSpotGrid"></div>
+        </div>
+
+        <!-- User Management -->
+        <div class="card mt-16">
+          <div class="card-header">
+            <span class="card-title">User Management &amp; Penalties</span>
+            <span class="card-icon">👥</span>
+          </div>
+          <div class="table-wrap">
+            <table id="userTable">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Tier</th>
+                  <th>Score</th>
+                  <th>No-Shows</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="userTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── ANALYTICS VIEW ──────────────────────── -->
+      <div class="view" id="view-analytics">
+        <div class="page-header flex-between">
+          <div>
+            <h1 class="page-title">Analytics &amp; <span>Insights</span></h1>
+            <p class="page-subtitle">Historical utilization, no-show trends, and ROI reporting.</p>
+          </div>
+          <button class="btn btn-ghost" onclick="exportReport()">📄 Export Report</button>
+        </div>
+
+        <div class="grid-4 mb-16" id="analyticsStats"></div>
+
+        <div class="grid-2 mb-16">
+          <!-- Weekly Chart -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Weekly Occupancy (%)</span>
+              <span class="card-icon">📈</span>
+            </div>
+            <canvas id="occupancyChart" height="200"></canvas>
+          </div>
+
+          <!-- No-show Chart -->
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">No-Show Trends</span>
+              <span class="card-icon">❌</span>
+            </div>
+            <canvas id="noshowChart" height="200"></canvas>
+          </div>
+        </div>
+
+        <!-- Heatmap -->
+        <div class="card mb-16">
+          <div class="card-header">
+            <span class="card-title">Occupancy Heatmap — Last 4 Weeks</span>
+            <span class="card-icon">🌡️</span>
+          </div>
+          <div id="heatmapContainer"></div>
+        </div>
+
+        <!-- Top no-shows table -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">No-Show Leaderboard</span>
+            <span class="card-icon">🚨</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Employee</th>
+                  <th>No-Shows (30d)</th>
+                  <th>Lost Spots</th>
+                  <th>Penalty Level</th>
+                  <th>Score Impact</th>
+                </tr>
+              </thead>
+              <tbody id="noshowTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /main-content -->
+  </div><!-- /app -->
+
+  <!-- ──────────────────────── TOAST CONTAINER ──────────────────────── -->
+  <div id="toast-container"></div>
+
+  <!-- ──────────────────────── MODALS ──────────────────────── -->
+
+  <!-- Carpool Modal -->
+  <div class="modal-overlay hidden" id="carpoolModal">
+    <div class="modal">
+      <div class="modal-close" onclick="closeModal('carpoolModal')">✕</div>
+      <div class="modal-title">🚗 Register Carpool</div>
+      <div class="modal-subtitle">List colleagues sharing your ride. This boosts everyone's priority score.</div>
+      <div class="form-group">
+        <label class="form-label">Your Carpool Partners</label>
+        <select class="form-select" id="carpoolModalSelect">
+          <option value="">Select colleague...</option>
+        </select>
+      </div>
+      <div id="carpoolModalTags"
+        style="display:flex;flex-wrap:wrap;gap:4px;min-height:36px;padding:8px;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);margin-bottom:16px">
+      </div>
+      <button class="btn btn-ghost w-full mb-12" onclick="addCarpoolModalTag()">+ Add Partner</button>
+      <button class="btn btn-success w-full" onclick="submitCarpool()">✅ Register Carpool Group</button>
+    </div>
+  </div>
+
+  <!-- Midday Exit Modal -->
+  <div class="modal-overlay hidden" id="middayModal">
+    <div class="modal">
+      <div class="modal-close" onclick="closeModal('middayModal')">✕</div>
+      <div class="modal-title">🚶 Midday Departure</div>
+      <div class="modal-subtitle">Leaving the premises? Tell us when you expect to return.</div>
+      <div class="form-group">
+        <label class="form-label">Departure Type</label>
+        <select class="form-select" id="departureType">
+          <option value="temporary">⏱ Temporary (spot held for you)</option>
+          <option value="permanent">🚪 End of Day (spot released)</option>
+        </select>
+      </div>
+      <div id="tempReturnGroup">
+        <div class="form-group">
+          <label class="form-label">Expected Return Time</label>
+          <input type="time" class="form-input" id="returnTime" value="14:00">
+          <p class="form-help" id="middayLimit">Max 3 hours. Exceeding this auto-releases your spot.</p>
+        </div>
+      </div>
+      <button class="btn btn-warn w-full mt-8" onclick="submitMiddayExit()">Confirm Departure</button>
+    </div>
+  </div>
+
+  <!-- Notifications Panel -->
+  <div class="modal-overlay hidden" id="notifModal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-close" onclick="closeModal('notifModal')">✕</div>
+      <div class="modal-title">🔔 Notifications</div>
+      <div class="modal-subtitle">Recent system alerts and messages.</div>
+      <div id="notifList" style="display:flex;flex-direction:column;gap:10px;max-height:400px;overflow-y:auto"></div>
+      <button class="btn btn-ghost w-full mt-16" onclick="clearNotifs()">Clear All</button>
+    </div>
+  </div>
+
+  <!-- Offer Accept Modal -->
+  <div class="modal-overlay hidden" id="offerModal">
+    <div class="modal">
+      <div class="modal-close" onclick="closeModal('offerModal')">✕</div>
+      <div class="modal-title">🎉 Parking Spot Available!</div>
+      <div class="modal-subtitle">A spot has opened up. You have a limited time to accept.</div>
+      <div class="offer-banner" id="offerModalContent"></div>
+      <div style="font-size:13px;text-align:center;color:var(--text-secondary);margin-bottom:20px">
+        Time remaining: <span id="offerModalTimer"
+          style="color:var(--accent-yellow);font-weight:700;font-size:16px">10:00</span>
+      </div>
+      <div style="display:flex;gap:12px">
+        <button class="btn btn-success" style="flex:1" onclick="acceptOffer()">✅ Accept Spot</button>
+        <button class="btn btn-danger" style="flex:1" onclick="declineOffer()">❌ Decline</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script src="render.js"></script>
+</body>
+
+</html>
