@@ -127,6 +127,9 @@ async function fetchBackendState(token) {
         SPOTS.length = 0; SPOTS.push(...data.spots);
         BOOKINGS.length = 0; BOOKINGS.push(...data.bookings);
         if (data.settings.capacity) STATE.capacity = parseInt(data.settings.capacity);
+        if (data.settings.vipSpots) STATE.vipSpots = parseInt(data.settings.vipSpots);
+        if (data.settings.carpoolSpots) STATE.carpoolSpots = parseInt(data.settings.carpoolSpots);
+        if (data.settings.evSpots) STATE.evSpots = parseInt(data.settings.evSpots);
 
         checkPendingOffers();
         return true;

@@ -393,6 +393,23 @@ function renderAdmin() {
         } catch (e) { }
         adminPanel.style.display = (userRole === 'admin') ? 'block' : 'none';
     }
+    // Sync admin inputs to current configuration
+    const capSlider = document.getElementById('capacitySlider');
+    if (capSlider && STATE.capacity) capSlider.value = STATE.capacity;
+    const dp = document.getElementById('capacityDisplay');
+    if (dp && STATE.capacity) dp.innerHTML = STATE.capacity;
+
+    const vipSp = document.getElementById('vipSpots');
+    if (vipSp && typeof STATE.vipSpots !== 'undefined') vipSp.value = STATE.vipSpots;
+
+    const cpSp = document.getElementById('carpoolSpots');
+    if (cpSp && typeof STATE.carpoolSpots !== 'undefined') cpSp.value = STATE.carpoolSpots;
+
+    const evSp = document.getElementById('evSpots');
+    if (evSp && typeof STATE.evSpots !== 'undefined') evSp.value = STATE.evSpots;
+
+    const gp = document.getElementById('gracePeriod');
+    if (gp && STATE.gracePeriod) gp.value = STATE.gracePeriod;
 
     renderAdminStats();
     renderSpotGrid();
@@ -446,7 +463,7 @@ function renderUserTable() {
     const el = document.getElementById('userTableBody');
     if (!el) return;
     el.innerHTML = USERS.map(function (u) {
-        const score = calcPriority(u, u.carpoolWith.length).toFixed(2);
+        const score = calcPriority(u, (u.carpoolWith || []).length).toFixed(2);
         const bk = getUserBookingToday(u.id);
         var statusHtml;
         if (u.banned) {
