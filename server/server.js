@@ -300,9 +300,9 @@ app.post('/api/admin/force-book', authenticateToken, requireAdmin, (req, res) =>
 app.post('/api/admin/rules', authenticateToken, requireAdmin, (req, res) => {
     const rules = req.body; // e.g., { gracePeriod: 20, middayMax: 3, ... }
     db.serialize(() => {
-        const stmt = db.prepare("UPDATE settings SET value = ? WHERE key = ?");
+        const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
         for (const key of Object.keys(rules)) {
-            stmt.run(String(rules[key]), key);
+            stmt.run(key, String(rules[key]));
         }
         stmt.finalize(() => {
             logAction(req.user.id, 'admin_rules_update', `Updated global settings`);
