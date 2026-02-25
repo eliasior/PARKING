@@ -306,8 +306,41 @@ app.post('/api/admin/rules', authenticateToken, requireAdmin, (req, res) => {
         }
         stmt.finalize(() => {
             logAction(req.user.id, 'admin_rules_update', `Updated global settings`);
-            broadcastUpdate();
-            res.json({ success: true });
+
+            // If capacity was changed, resize the spots table
+            if (rules.capacity !== undefined) {
+                const cap = parseInt(rules.capacity);
+                const vip = parseInt(rules.vipSpots || 0);
+                const cp = parseInt(rules.carpoolSpots || 0);
+                const ev = parseInt(rules.evSpots || 0);
+
+                db.run("DELETE FROM spots WHERE num > ?", [cap]);
+                db.get("SELECT MAX(num) as maxNum FROM spots", (err, row) => {
+                    const currentMax = (row && row.maxNum) ? row.maxNum : 0;
+                    if (currentMax < cap) {
+                        const s_stmt = db.prepare("INSERT INTO spots (id, num, state, isCarpool, isVIP, isEV) VALUES (?, ?, 'available', 0, 0, 0)");
+                        for (let i = currentMax + 1; i <= cap; i++) {
+                            s_stmt.run(`S${i}`, i);
+                        }
+                        s_stmt.finalize();
+                    }
+
+                    db.run("UPDATE spots SET isCarpool = 0, isEV = 0, isVIP = 0", () => {
+                        if (cp > 0) db.run("UPDATE spots SET isCarpool = 1 WHERE num <= ?", [cp]);
+                        if (ev > 0) db.run("UPDATE spots SET isEV = 1 WHERE num > ? AND num <= ?", [cp, cp + ev]);
+                        if (vip > 0) db.run("UPDATE spots SET isVIP = 1 WHERE num > ?", [cap - vip]);
+
+                        // Give db a moment to finish updates before broadcasting
+                        setTimeout(() => {
+                            broadcastUpdate();
+                            res.json({ success: true });
+                        }, 500);
+                    });
+                });
+            } else {
+                broadcastUpdate();
+                res.json({ success: true });
+            }
         });
     });
 });
