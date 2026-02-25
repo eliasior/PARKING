@@ -10,7 +10,7 @@
 // ── Auth & API ────────────────────────────────────────────────
 // איתור אוטומטי של סביבת העבודה (מקומי לעומת ייצור ב-GitHub Pages)
 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const PRODUCTION_SERVER = 'https://parkiq-server.onrender.com'; // נעדכן את זה ברגע שהשרת יעלה לאוויר
+const PRODUCTION_SERVER = 'https://parking-qgzw.onrender.com'; // נעדכן את זה ברגע שהשרת יעלה לאוויר
 
 const BASE_URL = isLocal ? 'http://localhost:3000' : PRODUCTION_SERVER;
 const API_URL = `${BASE_URL}/api`;
