@@ -65,7 +65,7 @@ function renderEmployee() {
 
     const statsEl = document.getElementById('empStatCards');
     if (statsEl) {
-        const score = calcPriority(user, user.carpoolWith.length).toFixed(1);
+        const score = calcPriority(user, (user.carpoolWith || []).length).toFixed(1);
         const wlPos = WAITLIST.findIndex(function (e) { return e.userId === user.id; });
         const avail = SPOTS.filter(function (s) { return s.state === 'available' && !s.isVIP; }).length;
         const scoreColor = avail > 5 ? 'green' : avail > 2 ? 'yellow' : 'red';
