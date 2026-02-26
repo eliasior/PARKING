@@ -466,23 +466,26 @@ function clearGraceTimer(spotId) {
 
 function startGraceTimer(spotId, userId) {
     clearGraceTimer(spotId);
-    // Hardcoded to 20 mins for now, or fetch from settings
-    const ms = 20 * 60 * 1000;
-    graceTimers[spotId] = setTimeout(() => {
-        db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
-            if (row && row.state === 'reserved') {
-                db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
-                    db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId]);
-                    db.run("UPDATE users SET noShows = noShows + 1 WHERE id = ?", [userId]);
-                    console.log(`Grace period expired for spot ${spotId}, released.`);
-                    broadcastUpdate();
+    db.get("SELECT value FROM settings WHERE key = 'gracePeriod'", (err, row) => {
+        const mins = (row && row.value) ? parseFloat(row.value) : 20;
+        const ms = mins * 60 * 1000;
 
-                    // Trigger waitlist
-                    processWaitlist(spotId);
-                });
-            }
-        });
-    }, ms);
+        graceTimers[spotId] = setTimeout(() => {
+            db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
+                if (row && row.state === 'reserved') {
+                    db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
+                        db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId]);
+                        db.run("UPDATE users SET noShows = noShows + 1 WHERE id = ?", [userId]);
+                        console.log(`Grace period expired for spot ${spotId}, released.`);
+                        broadcastUpdate();
+
+                        // Trigger waitlist
+                        processWaitlist(spotId);
+                    });
+                }
+            });
+        }, ms);
+    });
 }
 
 function clearOfferTimer(spotId) {
@@ -494,25 +497,43 @@ function clearOfferTimer(spotId) {
 
 function startOfferTimer(spotId, userId) {
     clearOfferTimer(spotId);
-    const ms = 10 * 60 * 1000; // 10 minutes
-    offerTimers[spotId] = setTimeout(() => {
-        db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
-            if (row && row.state === 'pending_offer') {
-                db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
-                    db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'offered'", [spotId, userId]);
-                    console.log(`Offer period expired for spot ${spotId}, released.`);
-                    broadcastUpdate();
+    db.get("SELECT value FROM settings WHERE key = 'offerPeriod'", (err, row) => {
+        const mins = (row && row.value) ? parseFloat(row.value) : 10;
+        const ms = mins * 60 * 1000;
 
-                    processWaitlist(spotId);
-                });
-            }
-        });
-    }, ms);
+        offerTimers[spotId] = setTimeout(() => {
+            db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
+                if (row && row.state === 'pending_offer') {
+                    db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
+                        db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'offered'", [spotId, userId]);
+                        console.log(`Offer period expired for spot ${spotId}, released.`);
+                        broadcastUpdate();
+
+                        processWaitlist(spotId);
+                    });
+                }
+            });
+        }, ms);
+    });
 }
 
 app.post('/api/spots/:id/reserve', authenticateToken, (req, res) => {
     const { userId } = req.body;
     const spotId = req.params.id;
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    // For simplicity, we assume the reservation is for today (as seen in the INSERT below)
+    // In a real app, we'd check the requested date.
+    const bookingTime = '09:00'; // The default time used below
+    const [h, m] = bookingTime.split(':').map(Number);
+    const checkDate = new Date();
+    checkDate.setHours(h, m, 0, 0);
+
+    if (checkDate < now) {
+        return res.status(400).json({ error: 'Cannot reserve a spot for a time that has passed today.' });
+    }
+
     const reservedAt = Date.now();
 
     db.run("UPDATE spots SET state = 'reserved', userId = ?, reservedAt = ? WHERE id = ? AND state = 'available'",
@@ -521,17 +542,63 @@ app.post('/api/spots/:id/reserve', authenticateToken, (req, res) => {
             if (err) return res.status(500).json({ error: err.message });
             if (this.changes === 0) return res.status(409).json({ error: 'Spot already taken (race condition handled)' });
 
-            logAction(userId, 'reserve_spot', `Reserved spot ${spotId} `);
-            startGraceTimer(spotId, userId);
-            broadcastUpdate();
-            res.json({ success: true, spotId, userId });
+            const todayStr = new Date().toISOString().split('T')[0];
+            db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [`B${Date.now()}`, userId, todayStr, '09:00', spotId, 'reserved', '[]', 0, 100, 0, Date.now(), 0],
+                () => {
+                    logAction(userId, 'reserve_spot', `Reserved spot ${spotId} `);
+                    startGraceTimer(spotId, userId);
+                    broadcastUpdate();
+                    res.json({ success: true, spotId, userId });
+                }
+            );
         }
     );
 });
 
+app.post('/api/bookings/waitlist', authenticateToken, (req, res) => {
+    const { userId, date, time, carpoolWith, carpoolVerified, score } = req.body;
+
+    // Time Validation
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    if (date === todayStr) {
+        const [h, m] = time.split(':').map(Number);
+        const checkDate = new Date();
+        checkDate.setHours(h, m, 0, 0);
+        if (checkDate < now) {
+            return res.status(400).json({ error: 'Cannot join waitlist for a time that has passed today.' });
+        }
+    }
+
+    const bookingId = `B${Date.now()}`;
+    const cwStr = JSON.stringify(carpoolWith || []);
+
+    db.get("SELECT id FROM bookings WHERE userId = ? AND date = ? AND status IN ('waitlist', 'reserved', 'offered')", [userId, date], (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (row) return res.status(409).json({ error: 'כבר קיימת הזמנה או בקשת המתנה לתאריך זה.' });
+
+        const now = Date.now();
+        db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, NULL, 'waitlist', ?, ?, ?, 0, ?, 0)",
+            [bookingId, userId, date, time, cwStr, carpoolVerified ? 1 : 0, score, now],
+            function (err) {
+                if (err) return res.status(500).json({ error: err.message });
+                logAction(userId, 'join_waitlist', `Joined waitlist for ${date}`);
+
+                db.get("SELECT COUNT(*) as pos FROM bookings WHERE status = 'waitlist' AND date = ? AND (score > ? OR (score = ? AND createdAt <= ?))",
+                    [date, score, score, now], (err, row) => {
+
+                        broadcastUpdate();
+                        res.json({ success: true, waitlistPos: row ? row.pos : 1, bookingId });
+                    });
+            }
+        );
+    });
+});
+
 app.post('/api/spots/:id/offer/accept', authenticateToken, (req, res) => {
     const spotId = req.params.id;
-    const { userId } = req.user;
+    const userId = req.user.id;
 
     db.run("UPDATE spots SET state = 'reserved' WHERE id = ? AND userId = ? AND state = 'pending_offer'",
         [spotId, userId],
@@ -550,7 +617,7 @@ app.post('/api/spots/:id/offer/accept', authenticateToken, (req, res) => {
 
 app.post('/api/spots/:id/offer/decline', authenticateToken, (req, res) => {
     const spotId = req.params.id;
-    const { userId } = req.user;
+    const userId = req.user.id;
 
     db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ? AND userId = ? AND state = 'pending_offer'",
         [spotId, userId],
@@ -569,7 +636,7 @@ app.post('/api/spots/:id/offer/decline', authenticateToken, (req, res) => {
 
 app.post('/api/spots/:id/checkin', authenticateToken, (req, res) => {
     const spotId = req.params.id;
-    const { userId } = req.user;
+    const userId = req.user.id;
 
     db.run("UPDATE spots SET state = 'occupied' WHERE id = ? AND userId = ? AND state = 'reserved'",
         [spotId, userId],
@@ -613,7 +680,7 @@ app.post('/api/qr-checkin', (req, res) => {
 
 app.post('/api/spots/:id/cancel', authenticateToken, (req, res) => {
     const spotId = req.params.id;
-    const { userId } = req.user;
+    const userId = req.user.id;
 
     db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ? AND userId = ?",
         [spotId, userId],
@@ -634,7 +701,7 @@ app.post('/api/spots/:id/cancel', authenticateToken, (req, res) => {
 
 app.post('/api/spots/:id/checkout', authenticateToken, (req, res) => {
     const spotId = req.params.id;
-    const { userId } = req.user;
+    const userId = req.user.id;
 
     db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ? AND userId = ?",
         [spotId, userId],
@@ -667,6 +734,25 @@ setInterval(() => {
         console.log('[CRON] Running Midnight Reset...');
 
         db.serialize(() => {
+            // Reward Eco-Points for yesterday's successful parking
+            const yesterday = new Date(now.getTime() - 1000); // 1 second before midnight
+            const targetDateStr = yesterday.toISOString().split('T')[0];
+
+            db.all("SELECT userId, carpoolWith, carpoolVerified FROM bookings WHERE date = ? AND status IN ('fulfilled', 'completed')", [targetDateStr], (err, rows) => {
+                if (rows && rows.length > 0) {
+                    rows.forEach(row => {
+                        let pts = 10; // Base points for valid check-in
+                        try {
+                            const cp = JSON.parse(row.carpoolWith || "[]");
+                            if (row.carpoolVerified) {
+                                pts += (cp.length * 5); // +5 per valid carpool member
+                            }
+                        } catch (e) { }
+                        db.run("UPDATE users SET ecoPoints = ecoPoints + ? WHERE id = ?", [pts, row.userId]);
+                    });
+                }
+            });
+
             db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL");
             db.run("UPDATE users SET graceUsedToday = 0");
             db.run("UPDATE bookings SET status = 'cancelled' WHERE status IN ('reserved', 'waitlist', 'offered')");
@@ -675,14 +761,13 @@ setInterval(() => {
                 db.run("UPDATE users SET graceUsedWeek = 0");
             }
 
-            console.log('[CRON] Midnight Reset Complete.');
+            console.log('[CRON] Midnight Reset & Eco-Points Distribution Complete.');
             broadcastUpdate();
         });
     }
-}, 60000);
-
+}, 60 * 1000); // Check every minute
 
 // Use server.listen instead of app.listen for Socket.io
 server.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT} `);
+    console.log(`Server listening on port ${PORT}`);
 });
