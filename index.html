@@ -73,6 +73,12 @@
           <span class="notif-badge" id="notifBadge">0</span>
         </div>
       </div>
+      <div id="offlineIndicator" class="offline-pill hidden"
+        style="display:flex; align-items:center; gap:8px; background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); padding:4px 12px; border-radius:20px; color:var(--accent-red); font-size:12px; font-weight:600;">
+        <span class="dot-live"
+          style="background:var(--accent-red); box-shadow:0 0 10px var(--accent-red); width:8px; height:8px;"></span>
+        <span>מצב לא מקוון - מתחבר...</span>
+      </div>
     </nav>
 
     <!-- ── Notification Center (Phase 3) ── -->
@@ -90,8 +96,10 @@
     <div class="menu-backdrop" id="menuBackdrop" onclick="toggleMenu()"></div>
 
     <div class="nav-tabs" id="mainTabs">
-      <button class="nav-tab active" data-view="employee"><span class="nav-icon">👤</span><span class="nav-text">איזור
-          אישי</span></button>
+      <button class="nav-tab active" data-view="employee"><span class="nav-icon">🏠</span><span
+          class="nav-text">ראשי</span></button>
+      <button class="nav-tab" data-view="profile"><span class="nav-icon">👤</span><span class="nav-text">הפרופיל
+          שלי</span></button>
       <button class="nav-tab" data-view="booking"><span class="nav-icon">📅</span><span class="nav-text">הזמן
           חניה</span></button>
       <button class="nav-tab" data-view="checkin"><span class="nav-icon">✅</span><span
@@ -117,6 +125,18 @@
 
     <!-- ── Main Content ── -->
     <div class="main-content">
+
+      <!-- ──────────────────────── MY PROFILE VIEW ──────────────────────── -->
+      <div class="view" id="view-profile">
+        <div class="page-header">
+          <h1>הפרופיל שלי</h1>
+          <p class="subtitle">מידע אישי, הסטוריית חניות ומדדי משתמש</p>
+        </div>
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));"
+          id="profileMetricsGrid">
+          <!-- populated by JS -->
+        </div>
+      </div>
 
       <!-- ──────────────────────── EMPLOYEE VIEW ──────────────────────── -->
       <div class="view active" id="view-employee">

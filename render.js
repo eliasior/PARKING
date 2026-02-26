@@ -338,7 +338,13 @@ function renderWaitlist() {
 
     if (qEl) {
         if (!WAITLIST.length) {
-            qEl.innerHTML = '<div class="empty-state"><span class="empty-ico">🎉</span><p>תור ההמתנה ריק — יש חניות פנויות!</p></div>';
+            qEl.innerHTML = `
+                <div class="empty-state" style="padding: 40px 20px; text-align: center; color: var(--text-muted); background: rgba(16, 185, 129, 0.05); border-radius: 12px; border: 1px dashed rgba(16, 185, 129, 0.2);">
+                    <div style="font-size: 44px; margin-bottom: 12px;">🎉</div>
+                    <p style="font-size: 16px; font-weight: 600; color: var(--accent-green);">החניון פנוי לרווחה!</p>
+                    <p style="font-size: 13px; opacity: 0.8; margin-top: 4px;">אין כרגע ממתינים בתור. זו הזדמנות מצוינת להזמין חניה.</p>
+                </div>
+            `;
         } else {
             qEl.innerHTML = WAITLIST.map(function (e, i) {
                 const u = getUserById(e.userId);
@@ -361,8 +367,14 @@ function renderWaitlist() {
                 myEl.innerHTML = '<div class="text-center" style="padding:20px"><span style="font-size:40px;display:block;margin-bottom:12px">✅</span>' +
                     '<strong>יש לך חניה!</strong><p class="text-sm mt-8">חניה ' + (bk.spotId || '') + ' שמורה עבורך.</p></div>';
             } else {
-                myEl.innerHTML = '<div class="empty-state"><span class="empty-ico">📋</span><p>לא בתור. אנא הזמן קודם חניה.</p>' +
-                    '<button class="btn btn-primary mt-16" onclick="switchView(\'booking\')">הזמן עכשיו</button></div>';
+                myEl.innerHTML = `
+                    <div class="empty-state" style="padding: 30px 20px; text-align: center; color: var(--text-muted);">
+                        <div style="font-size: 40px; margin-bottom: 12px; opacity: 0.6;">📋</div>
+                        <p style="font-size: 14px; font-weight: 500;">אינך רשום בתור להיום</p>
+                        <p style="font-size: 12px; opacity: 0.7; margin-top: 4px; margin-bottom: 20px;">רוצה לשריין מקום? בדוק זמינות במערכת ההזמנות.</p>
+                        <button class="btn btn-primary btn-sm" onclick="switchView('booking')" style="padding: 10px 20px;">הזמן חניה עכשיו</button>
+                    </div>
+                `;
             }
         } else {
             const bk = getUserBookingToday(user.id);
@@ -635,6 +647,70 @@ function renderNoShowTable() {
     }).join('');
 }
 
+function renderProfile() {
+    const el = document.getElementById('profileMetricsGrid');
+    if (!el) return;
+    const user = getUser();
+    if (!user) return;
+
+    // Get 5 most recent bookings for the user
+    const userHistory = BOOKINGS
+        .filter(function (b) { return b.userId === user.id; })
+        .sort(function (a, b) { return b.createdAt - a.createdAt; })
+        .slice(0, 5);
+
+    let historyHtml = userHistory.map(function (b) {
+        let statusColor = 'var(--text-muted)';
+        let statusHebrew = b.status;
+        if (b.status === 'completed' || b.status === 'fulfilled' || b.status === 'occupied') {
+            statusColor = 'var(--accent-green)';
+            statusHebrew = 'מומשה';
+        }
+        if (b.status === 'cancelled') {
+            statusColor = 'var(--accent-red)';
+            statusHebrew = 'בוטלה';
+        }
+        if (b.status === 'reserved') statusHebrew = 'שמורה';
+        if (b.status === 'waitlist') statusHebrew = 'בהמתנה';
+
+        return '<div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">' +
+            '<span style="font-weight: 500;">' + b.date + ' | ' + b.time + '</span>' +
+            '<span class="status-pill" style="color: ' + statusColor + '; border: 1px solid ' + statusColor + '; background: transparent;">' + statusHebrew + '</span>' +
+            '</div>';
+    }).join('');
+
+    if (!historyHtml) historyHtml = `
+        <div class="empty-state" style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
+            <div style="font-size: 40px; margin-bottom: 12px; opacity: 0.5;">📅</div>
+            <p style="font-size: 14px; font-weight: 500;">טרם בוצעו הזמנות</p>
+            <p style="font-size: 12px; opacity: 0.7; margin-top: 4px;">ההיסטוריה שלך תופיע כאן לאחר שתשתמש בשירות.</p>
+        </div>
+    `;
+
+    el.innerHTML =
+        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
+        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">Eco-Points 🌱</div>' +
+        '<div class="stat-value" style="color:var(--accent-green); font-size: 2.5rem;">' + (user.ecoPoints || 0) + '</div>' +
+        '<div class="stat-desc" style="margin-top: 8px;">מדד אקולוגי למניעת זיהום אוויר ושמירה על סדר</div>' +
+        '</div>' +
+        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
+        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">עבירות (No-shows) ⚠️</div>' +
+        '<div class="stat-value" style="color:' + (user.noShows > 0 ? 'var(--accent-red)' : 'var(--accent-cyan)') + '; font-size: 2.5rem;">' + (user.noShows || 0) + '</div>' +
+        '<div class="stat-desc" style="margin-top: 8px;">אי-הגעה לאחר הזמנה ללא ביטול בזמן</div>' +
+        '</div>' +
+        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
+        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">ימי חסד (Grace) ⏳</div>' +
+        '<div class="stat-value" style="font-size: 2.5rem;">' + (user.graceUsedWeek || 0) + ' <span style="font-size: 1.5rem; color: var(--text-muted);">/ 2</span></div>' +
+        '<div class="stat-desc" style="margin-top: 8px;">ניצולת חסד שבועית לביטולי רגע-אחרון</div>' +
+        '</div>' +
+        '<div class="stat-card" style="grid-column: 1 / -1; margin-top: 16px;">' +
+        '<div class="stat-title" style="margin-bottom: 16px; font-size: 1.1rem;">היסטוריית הזמנות 📋</div>' +
+        '<div style="background: var(--surface-hover); border-radius: 8px; overflow: hidden; border: 1px solid var(--border);">' +
+        historyHtml +
+        '</div>' +
+        '</div>';
+}
+
 /* ══════════════════════════════════════════════════════════════
    INITIALIZATION
    ══════════════════════════════════════════════════════════════ */
@@ -688,6 +764,13 @@ function init() {
             if (n === 'waitlist') renderWaitlist();
         }
     }, 30000);
+
+    // Global UI Check-in (1s)
+    setInterval(function () {
+        if (typeof updateOfferCountdowns === 'function') {
+            updateOfferCountdowns();
+        }
+    }, 1000);
 
     // Welcome toast
     setTimeout(function () {

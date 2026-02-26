@@ -24,6 +24,14 @@ function initSocketConnection(token) {
 
     socket.on('connect', () => {
         console.log("Connected to Real-Time Server", socket.id);
+        const indicator = document.getElementById('offlineIndicator');
+        if (indicator) indicator.classList.add('hidden');
+    });
+
+    socket.on('disconnect', () => {
+        console.log("Disconnected from Real-Time Server");
+        const indicator = document.getElementById('offlineIndicator');
+        if (indicator) indicator.classList.remove('hidden');
     });
 
     // Listen for state push from server
@@ -126,16 +134,35 @@ async function fetchBackendState(token) {
         USERS.length = 0; USERS.push(...data.users);
         SPOTS.length = 0; SPOTS.push(...data.spots);
         BOOKINGS.length = 0; BOOKINGS.push(...data.bookings);
+
+        // Populate WAITLIST from bookings and sort by score (desc) then createdAt (asc)
+        const wl = BOOKINGS.filter(b => b.status === 'waitlist')
+            .sort((a, b) => (b.score - a.score) || (a.createdAt - b.createdAt));
+        WAITLIST.length = 0;
+        WAITLIST.push(...wl);
         if (data.settings.capacity) STATE.capacity = parseInt(data.settings.capacity);
         if (data.settings.vipSpots) STATE.vipSpots = parseInt(data.settings.vipSpots);
         if (data.settings.carpoolSpots) STATE.carpoolSpots = parseInt(data.settings.carpoolSpots);
         if (data.settings.evSpots) STATE.evSpots = parseInt(data.settings.evSpots);
 
         checkPendingOffers();
+        updateEcoBadge();
         return true;
     } catch (e) {
         console.error("Backend fetch error:", e);
         return false;
+    }
+}
+
+function updateEcoBadge() {
+    const user = USERS.find(u => u.id === STATE.currentUserId);
+    if (!user) return;
+
+    const badge = document.getElementById('navEcoPoints');
+    const val = document.getElementById('ecoPointsValue');
+    if (badge && val) {
+        val.textContent = user.ecoPoints || 0;
+        badge.style.display = 'inline-block';
     }
 }
 
@@ -255,11 +282,19 @@ async function submitBooking() {
         } else { user.banned = false; }
     }
 
-    const dateVal = document.getElementById('bookingDate').value;
-    const timeVal = document.getElementById('bookingTime').value;
-    const carpools = getCarpoolTagIds();
-
     if (!dateVal) { showToast('warn', '⚠️ חסר תאריך', 'אנא בחר תאריך.'); return; }
+
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    if (dateVal === todayStr) {
+        const [h, m] = timeVal.split(':').map(Number);
+        const bookingDate = new Date();
+        bookingDate.setHours(h, m, 0, 0);
+        if (bookingDate < now) {
+            showToast('error', '🕒 זמן עבר', 'לא ניתן להזמין חניה לשעה שכבר עברה היום.');
+            return;
+        }
+    }
 
     const carpoolVerified = carpools.length > 0;
     const score = calcPriority(user, carpools.length);
@@ -315,35 +350,39 @@ async function submitBooking() {
             showToast('error', 'שגיאה', err.message);
         }
     } else {
-        const booking = {
-            id: `B${Date.now()}`,
-            userId: user.id,
-            date: dateVal,
-            time: timeVal,
-            spotId: null,
-            status: 'waitlist',
-            carpoolWith: carpools,
-            carpoolVerified,
-            score,
-            noShow: false,
-            createdAt: Date.now()
-        };
-        BOOKINGS.push(booking);
+        try {
+            const token = localStorage.getItem('parkiq_token');
+            const res = await fetch(`${API_URL}/bookings/waitlist`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ userId: user.id, date: dateVal, time: timeVal, carpoolWith: carpools, carpoolVerified, score })
+            });
 
-        const pos = addToWaitlist(user, score, carpools.length);
-        booking.waitlistPos = pos;
-        showToast('warn', '📋 נוספת לרשימת ההמתנה', `אין חניות פנויות. אתה בתור #${pos} (ציון: ${score.toFixed(1)}).`);
-        addNotif('warn', 'רשימת המתנה', `מיקום #${pos} ל-${dateVal}. נודיע לך כשחניה תתפנה.`);
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'שגיאה בהצטרפות לרשימת המתנה');
+            }
+
+            const data = await res.json();
+            const pos = data.waitlistPos || 1;
+
+            showToast('warn', '📋 נוספת לרשימת ההמתנה', `אין חניות פנויות לחניון. אתה בתור #${pos} (ציון עדיפות: ${score.toFixed(1)}).`);
+            addNotif('warn', 'רשימת המתנה', `מיקום #${pos} ל-${dateVal}. נודיע לך במערכת כשחניה תתפנה עבורך.`);
+
+        } catch (err) {
+            showToast('error', 'שגיאה', err.message);
+        }
     }
 
     clearCarpoolTags();
 }
 
 function addToWaitlist(user, score, carpoolCount) {
-    const entry = { userId: user.id, score, requestedAt: Date.now(), offerExpiry: null };
-    WAITLIST.push(entry);
-    WAITLIST.sort((a, b) => b.score - a.score); // highest score first
-    return WAITLIST.findIndex(e => e.userId === user.id) + 1;
+    // Legacy function - waitlist logic moved to backend calculations
+    return 1;
 }
 
 // ── Auto-Release Callback ────────────────────────────────────────
@@ -377,7 +416,34 @@ function checkPendingOffers() {
         if (!document.getElementById('offerModal').classList.contains('open')) {
             showOfferModal(pendingSpot);
         }
+
+        // 🔔 Trigger Live OS Notification
+        if (!STATE.hasNotifiedOffer) {
+            STATE.hasNotifiedOffer = true;
+
+            // 1. Play Audio Chime
+            try {
+                const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+                audio.play().catch(e => console.log('Audio autoplay blocked by browser:', e));
+            } catch (e) { }
+
+            // 2. Fire Push Notification
+            if (Notification.permission === 'granted') {
+                new Notification('ParkIQ - הגיע תורך! 🚗', {
+                    body: `המתנתך השתלמה - התפנתה חניה #${pendingSpot.num} ואנחנו שומרים לך אותה ל-10 הדקות הקרובות. היכנס לאשר!`
+                });
+            } else if (Notification.permission !== 'denied') {
+                Notification.requestPermission().then(permission => {
+                    if (permission === 'granted') {
+                        new Notification('ParkIQ - הגיע תורך! 🚗', {
+                            body: `המתנתך השתלמה - התפנתה חניה #${pendingSpot.num} ואנחנו שומרים לך אותה ל-10 הדקות הקרובות. היכנס לאשר!`
+                        });
+                    }
+                });
+            }
+        }
     } else {
+        STATE.hasNotifiedOffer = false;
         hideOfferBanner();
         const m = document.getElementById('offerModal');
         if (m && m.classList.contains('open')) closeModal('offerModal');
@@ -539,16 +605,23 @@ function requestGraceExtension() {
     if (user.graceUsedToday) {
         showToast('warn', 'הגעת למכסה', 'כבר השתמשת בהארכת זמן היום.'); return;
     }
-    if (user.graceUsedWeek >= 1) {
-        showToast('warn', 'מכסה שבועית', 'כבר השתמשת בהארכת הזמן השבועית שלך.'); return;
+    if (user.graceUsedWeek >= 2) {
+        showToast('warn', 'מכסה שבועית', 'כבר השתמשת ב-2 הארכות הזמן השבועיות שלך.'); return;
     }
     const spot = SPOTS.find(s => s.userId === user.id && s.state === 'reserved');
     if (!spot) { showToast('warn', 'אין הזמנה', 'אין חניה פעילה להאריך עליה זמן.'); return; }
+
+    if (spot.graceExtended) {
+        showToast('warn', 'הארכה כבר בוצעה', 'ניתן להאריך את זמן ההגעה רק פעם אחת לכל הזמנה.'); return;
+    }
+
     clearGraceTimerForSpot(spot);
     const extMs = STATE.trafficExtension * 60 * 1000;
     graceTimers[spot.id] = setTimeout(() => {
         if (spot.state === 'reserved') autoReleaseSpot(spot, 'grace_expired_extended');
     }, extMs);
+
+    spot.graceExtended = true;
     user.graceUsedToday = true;
     user.graceUsedWeek++;
     showToast('success', `⏱ +${STATE.trafficExtension} דק' הארכה`, `הארכה אושרה. נא להגיע לחניה בהקדם!`);
@@ -919,6 +992,7 @@ function switchView(name) {
     if (name === 'analytics') renderAnalytics();
     if (name === 'booking') renderBookingView();
     if (name === 'employee') renderEmployee();
+    if (name === 'profile') renderProfile();
 }
 
 // ── Notifications ──────────────────────────────────────────────
@@ -1030,18 +1104,48 @@ function hideOfferBanner() {
 
 function showOfferModal(spot) {
     const content = document.getElementById('offerModalContent');
-    if (content) content.innerHTML = `<div style="font-size:32px">🅿️</div><div><strong style="display:block;font-size:18px">Spot #${spot.num}</strong><span style="color:var(--text-secondary);font-size:13px">Near entrance • ${spot.isCarpool ? 'Carpool priority' : 'Regular spot'}</span></div>`;
+    if (content) {
+        content.innerHTML = `
+            <div style="font-size:32px">🅿️</div>
+            <div>
+                <strong style="display:block;font-size:18px">חניה #${spot.num} אושרה</strong>
+                <span style="color:var(--text-secondary);font-size:13px">${spot.isCarpool ? 'חניית קארפול מועדפת' : 'חניה רגילה'}</span>
+            </div>
+            <div class="progress-bar-wrap" style="height:10px; width:100%; margin-top:12px;">
+                <div id="offerModalProgressBar" class="progress-bar-fill yellow" style="width:100%;"></div>
+            </div>`;
+    }
     openModal('offerModal');
 }
 
 function updateOfferCountdowns() {
-    const m = Math.floor(OFFER_SECONDS / 60);
-    const s = (OFFER_SECONDS % 60).toString().padStart(2, '0');
+    const spot = SPOTS.find(s => s.userId === STATE.currentUserId && s.state === 'pending_offer');
+    if (!spot || !spot.reservedAt) return;
+
+    const elapsed = Math.floor((Date.now() - spot.reservedAt) / 1000);
+    const totalSeconds = (STATE.offerWindow || 10) * 60;
+    const remaining = Math.max(0, totalSeconds - elapsed);
+
+    OFFER_SECONDS = remaining;
+
+    const m = Math.floor(remaining / 60);
+    const s = (remaining % 60).toString().padStart(2, '0');
     const txt = `${m}:${s}`;
+    const pct = (remaining / totalSeconds) * 100;
+
     ['offerCountdown', 'offerModalTimer'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) { el.textContent = txt; el.style.color = OFFER_SECONDS < 60 ? 'var(--accent-red)' : 'var(--accent-yellow)'; }
+        if (el) {
+            el.textContent = txt;
+            el.style.color = remaining < 60 ? 'var(--accent-red)' : 'var(--accent-yellow)';
+        }
     });
+
+    const progBar = document.getElementById('offerModalProgressBar');
+    if (progBar) {
+        progBar.style.width = pct + '%';
+        progBar.className = 'progress-bar-fill ' + (remaining < 60 ? 'red' : 'yellow');
+    }
 }
 
 function simulateGeoCheck() {
