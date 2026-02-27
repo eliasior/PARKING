@@ -5,6 +5,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const http = require('http'); // Added for Socket.io
 const { Server } = require('socket.io'); // Added for Socket.io
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,6 +15,9 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from the parent directory
+app.use(express.static(path.join(__dirname, '..')));
 
 const PORT = 3000;
 const SECRET_KEY = 'parkiq_secret_key_123'; // In production, use env var
@@ -68,7 +72,7 @@ function initDB() {
             state TEXT DEFAULT 'available',
             userId TEXT,
             reservedAt INTEGER,
-            graceTimer INTEGER,
+            expiresAt INTEGER, /* For persistent timers */
             isCarpool INTEGER DEFAULT 0,
             isVIP INTEGER DEFAULT 0,
             isEV INTEGER DEFAULT 0,
@@ -107,6 +111,33 @@ function initDB() {
         )`);
 
         seedInitialData();
+        recoverTimers();
+    });
+}
+
+function recoverTimers() {
+    console.log("[INIT] Recovering persistent timers...");
+    const now = Date.now();
+    db.all("SELECT id, userId, state, expiresAt FROM spots WHERE state IN ('reserved', 'pending_offer')", (err, rows) => {
+        if (err) return;
+        rows.forEach(spot => {
+            if (spot.expiresAt && spot.expiresAt < now) {
+                console.log(`[INIT] Timer already expired for spot ${spot.id}, processing now.`);
+                if (spot.state === 'reserved') {
+                    handleGraceExpiration(spot.id, spot.userId);
+                } else if (spot.state === 'pending_offer') {
+                    handleOfferExpiration(spot.id, spot.userId);
+                }
+            } else if (spot.expiresAt) {
+                const remaining = spot.expiresAt - now;
+                console.log(`[INIT] Restarting timer for spot ${spot.id}: ${Math.round(remaining / 1000)}s remaining.`);
+                if (spot.state === 'reserved') {
+                    startGraceTimer(spot.id, spot.userId, remaining);
+                } else if (spot.state === 'pending_offer') {
+                    startOfferTimer(spot.id, spot.userId, remaining);
+                }
+            }
+        });
     });
 }
 
@@ -251,13 +282,30 @@ app.delete('/api/users/:id', authenticateToken, requireAdmin, (req, res) => {
     if (idToDelete === 'ALMOG') {
         return res.status(403).json({ error: "Cannot delete the primary admin account ALMOG (Self-lockout prevention)." });
     }
-
     db.run("DELETE FROM users WHERE id = ?", [idToDelete], function (err) {
         if (err) return res.status(500).json({ error: err.message });
         logAction(req.user.id, 'admin_delete_user', `Deleted user ${idToDelete}`);
         res.json({ message: 'User deleted' });
         broadcastUpdate();
     });
+});
+
+app.put('/api/users/:id', authenticateToken, requireAdmin, (req, res) => {
+    const { name, email, tier, role, isEV } = req.body;
+    const { id } = req.params;
+
+    if (!name || !tier) return res.status(400).json({ error: "Name and Tier are required" });
+
+    db.run(`UPDATE users SET name = ?, email = ?, tier = ?, role = ?, isEV = ? WHERE id = ?`,
+        [name, email, parseInt(tier), role || 'user', isEV ? 1 : 0, id],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            if (this.changes === 0) return res.status(404).json({ error: "User not found" });
+
+            logAction(req.user.id, 'admin_update_user', `Updated user ${id}: ${name}, Tier ${tier}`);
+            broadcastUpdate();
+            res.json({ message: "User updated successfully" });
+        });
 });
 
 // Admin Clear Penalty
@@ -285,9 +333,14 @@ app.post('/api/admin/force-book', authenticateToken, requireAdmin, (req, res) =>
             if (err) return res.status(500).json({ error: err.message });
 
             db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [`B${Date.now()}`, userId, new Date().toISOString().split('T')[0], '09:00', spotId, 'reserved', '[]', 0, 100, 0, Date.now(), 1],
-                () => {
-                    logAction(req.user.id, 'admin_force_book', `Assigned spot ${spot.num} for user ${userId}`);
+                [`B${Date.now()}_${Math.floor(Math.random() * 1000)}`, userId, new Date().toISOString().split('T')[0], '09:00', spotId, 'reserved', '[]', 0, 100, 0, Date.now(), 1],
+                (err) => {
+                    if (err) {
+                        console.error("Force book insert error:", err);
+                        // Even if booking insert fails, the spot was already updated. We should probably try to be atomic, 
+                        // but for now let's at least log the error.
+                    }
+                    logAction(req.user.id, 'ADMIN_FORCE_BOOK', `Assigned spot ${spot.num} for user ${userId}`);
                     broadcastUpdate();
                     res.json({ success: true, spotNum: spot.num });
                 }
@@ -381,10 +434,12 @@ app.post('/api/admin/guest-pass', authenticateToken, requireAdmin, async (req, r
         db.run("UPDATE spots SET state = 'reserved', userId = ?, reservedAt = ? WHERE id = ?", [guestId, reservedAt, spot.id], function (err) {
             if (err) return res.status(500).json({ error: err.message });
 
+            const bookingId = `B${Date.now()}_${Math.floor(Math.random() * 1000)}`;
             db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [`B${Date.now()}`, guestId, new Date().toISOString().split('T')[0], '08:00', spot.id, 'reserved', '[]', 0, 100, 0, Date.now(), 1],
-                () => {
-                    logAction(req.user.id, 'admin_guest_pass', `Created guest pass ${guestId} and assigned spot ${spot.num}`);
+                [bookingId, guestId, new Date().toISOString().split('T')[0], '08:00', spot.id, 'reserved', '[]', 0, 100, 0, Date.now(), 1],
+                (err) => {
+                    if (err) console.error("Guest pass booking error:", err);
+                    logAction(req.user.id, 'ADMIN_GUEST_PASS', `Created guest pass ${guestId} and assigned spot ${spot.num}`);
                     broadcastUpdate();
                     res.json({ message: 'Guest pass created', guestId, spotNum: spot.num, code: `QR-${guestId}` });
                 }
@@ -464,27 +519,33 @@ function clearGraceTimer(spotId) {
     }
 }
 
-function startGraceTimer(spotId, userId) {
+function startGraceTimer(spotId, userId, overrideMs = null) {
     clearGraceTimer(spotId);
     db.get("SELECT value FROM settings WHERE key = 'gracePeriod'", (err, row) => {
         const mins = (row && row.value) ? parseFloat(row.value) : 20;
-        const ms = mins * 60 * 1000;
+        const ms = overrideMs !== null ? overrideMs : mins * 60 * 1000;
+        const expiresAt = Date.now() + ms;
+
+        // Persist expiration
+        db.run("UPDATE spots SET expiresAt = ? WHERE id = ?", [expiresAt, spotId]);
 
         graceTimers[spotId] = setTimeout(() => {
-            db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
-                if (row && row.state === 'reserved') {
-                    db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
-                        db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId]);
-                        db.run("UPDATE users SET noShows = noShows + 1 WHERE id = ?", [userId]);
-                        console.log(`Grace period expired for spot ${spotId}, released.`);
-                        broadcastUpdate();
-
-                        // Trigger waitlist
-                        processWaitlist(spotId);
-                    });
-                }
-            });
+            handleGraceExpiration(spotId, userId);
         }, ms);
+    });
+}
+
+function handleGraceExpiration(spotId, userId) {
+    db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
+        if (row && row.state === 'reserved') {
+            db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL, expiresAt = NULL WHERE id = ?", [spotId], () => {
+                db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId]);
+                db.run("UPDATE users SET noShows = noShows + 1 WHERE id = ?", [userId]);
+                console.log(`Grace period expired for spot ${spotId}, released.`);
+                broadcastUpdate();
+                processWaitlist(spotId);
+            });
+        }
     });
 }
 
@@ -495,25 +556,32 @@ function clearOfferTimer(spotId) {
     }
 }
 
-function startOfferTimer(spotId, userId) {
+function startOfferTimer(spotId, userId, overrideMs = null) {
     clearOfferTimer(spotId);
     db.get("SELECT value FROM settings WHERE key = 'offerPeriod'", (err, row) => {
         const mins = (row && row.value) ? parseFloat(row.value) : 10;
-        const ms = mins * 60 * 1000;
+        const ms = overrideMs !== null ? overrideMs : mins * 60 * 1000;
+        const expiresAt = Date.now() + ms;
+
+        // Persist expiration
+        db.run("UPDATE spots SET expiresAt = ? WHERE id = ?", [expiresAt, spotId]);
 
         offerTimers[spotId] = setTimeout(() => {
-            db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
-                if (row && row.state === 'pending_offer') {
-                    db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL WHERE id = ?", [spotId], () => {
-                        db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'offered'", [spotId, userId]);
-                        console.log(`Offer period expired for spot ${spotId}, released.`);
-                        broadcastUpdate();
-
-                        processWaitlist(spotId);
-                    });
-                }
-            });
+            handleOfferExpiration(spotId, userId);
         }, ms);
+    });
+}
+
+function handleOfferExpiration(spotId, userId) {
+    db.get("SELECT state FROM spots WHERE id = ?", [spotId], (err, row) => {
+        if (row && row.state === 'pending_offer') {
+            db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL, expiresAt = NULL WHERE id = ?", [spotId], () => {
+                db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'offered'", [spotId, userId]);
+                console.log(`Offer period expired for spot ${spotId}, released.`);
+                broadcastUpdate();
+                processWaitlist(spotId);
+            });
+        }
     });
 }
 
@@ -542,11 +610,12 @@ app.post('/api/spots/:id/reserve', authenticateToken, (req, res) => {
             if (err) return res.status(500).json({ error: err.message });
             if (this.changes === 0) return res.status(409).json({ error: 'Spot already taken (race condition handled)' });
 
-            const todayStr = new Date().toISOString().split('T')[0];
+            const bookingId = `B${Date.now()}_${Math.floor(Math.random() * 1000)}`;
             db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [`B${Date.now()}`, userId, todayStr, '09:00', spotId, 'reserved', '[]', 0, 100, 0, Date.now(), 0],
-                () => {
-                    logAction(userId, 'reserve_spot', `Reserved spot ${spotId} `);
+                [bookingId, userId, todayStr, '09:00', spotId, 'reserved', '[]', 0, 100, 0, Date.now(), 0],
+                (err) => {
+                    if (err) console.error("Reservation insert error:", err);
+                    logAction(userId, 'RESERVE_SPOT', `Reserved spot ${spotId} `);
                     startGraceTimer(spotId, userId);
                     broadcastUpdate();
                     res.json({ success: true, spotId, userId });
@@ -571,23 +640,22 @@ app.post('/api/bookings/waitlist', authenticateToken, (req, res) => {
         }
     }
 
-    const bookingId = `B${Date.now()}`;
-    const cwStr = JSON.stringify(carpoolWith || []);
-
     db.get("SELECT id FROM bookings WHERE userId = ? AND date = ? AND status IN ('waitlist', 'reserved', 'offered')", [userId, date], (err, row) => {
         if (err) return res.status(500).json({ error: err.message });
         if (row) return res.status(409).json({ error: 'כבר קיימת הזמנה או בקשת המתנה לתאריך זה.' });
 
-        const now = Date.now();
+        const nowTs = Date.now();
+        const bookingId = `B${nowTs}_${Math.floor(Math.random() * 1000)}`;
+        const cwStr = JSON.stringify(carpoolWith || []);
+
         db.run("INSERT INTO bookings (id, userId, date, time, spotId, status, carpoolWith, carpoolVerified, score, noShow, createdAt, forceBooked) VALUES (?, ?, ?, ?, NULL, 'waitlist', ?, ?, ?, 0, ?, 0)",
-            [bookingId, userId, date, time, cwStr, carpoolVerified ? 1 : 0, score, now],
+            [bookingId, userId, date, time, cwStr, carpoolVerified ? 1 : 0, score, nowTs],
             function (err) {
                 if (err) return res.status(500).json({ error: err.message });
-                logAction(userId, 'join_waitlist', `Joined waitlist for ${date}`);
+                logAction(userId, 'JOIN_WAITLIST', `Joined waitlist for ${date}`);
 
                 db.get("SELECT COUNT(*) as pos FROM bookings WHERE status = 'waitlist' AND date = ? AND (score > ? OR (score = ? AND createdAt <= ?))",
-                    [date, score, score, now], (err, row) => {
-
+                    [date, score, score, nowTs], (err, row) => {
                         broadcastUpdate();
                         res.json({ success: true, waitlistPos: row ? row.pos : 1, bookingId });
                     });
@@ -648,7 +716,7 @@ app.post('/api/spots/:id/checkin', authenticateToken, (req, res) => {
 
             // Mark booking as fulfilled
             db.run("UPDATE bookings SET status = 'fulfilled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId]);
-            logAction(userId, 'check_in', `Checked into spot ${spotId} `);
+            logAction(userId, 'CHECK_IN', `Checked into spot ${spotId} `);
             broadcastUpdate();
             res.json({ success: true, spotId });
         }
@@ -670,7 +738,7 @@ app.post('/api/qr-checkin', (req, res) => {
 
             clearGraceTimer(spot.id);
             db.run("UPDATE bookings SET status = 'fulfilled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spot.id, userId]);
-            logAction(userId, 'qr_checkin', `QR Scanned. Checked into spot ${spot.num}`);
+            logAction(userId, 'QR_CHECKIN', `QR Scanned. Checked into spot ${spot.num}`);
             broadcastUpdate();
 
             res.json({ success: true, spotNum: spot.num });
@@ -690,7 +758,7 @@ app.post('/api/spots/:id/cancel', authenticateToken, (req, res) => {
 
             clearGraceTimer(spotId);
             db.run("UPDATE bookings SET status = 'cancelled' WHERE spotId = ? AND userId = ? AND status = 'reserved'", [spotId, userId], () => {
-                logAction(userId, 'cancel_booking', `Cancelled reservation for spot ${spotId}`);
+                logAction(userId, 'CANCEL_BOOKING', `Cancelled reservation for spot ${spotId}`);
                 broadcastUpdate();
                 processWaitlist(spotId);
                 res.json({ success: true, spotId });
@@ -710,18 +778,13 @@ app.post('/api/spots/:id/checkout', authenticateToken, (req, res) => {
             if (this.changes === 0) return res.status(400).json({ error: 'Spot not found or not yours' });
 
             db.run("UPDATE bookings SET status = 'completed' WHERE spotId = ? AND userId = ? AND status = 'occupied'", [spotId, userId], () => {
-                logAction(userId, 'check_out', `Checked out of spot ${spotId} `);
+                logAction(userId, 'CHECK_OUT', `Checked out of spot ${spotId} `);
                 broadcastUpdate();
                 processWaitlist(spotId);
                 res.json({ success: true, spotId });
             });
         }
     );
-});
-
-// Catchall
-app.get('/', (req, res) => {
-    res.send("ParkIQ API & WebSocket Server Running");
 });
 
 // ── Midnight Reset Cron Job ────────────────────────────────────
@@ -753,9 +816,11 @@ setInterval(() => {
                 }
             });
 
-            db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL");
+            db.run("UPDATE spots SET state = 'available', userId = NULL, reservedAt = NULL, expiresAt = NULL");
             db.run("UPDATE users SET graceUsedToday = 0");
-            db.run("UPDATE bookings SET status = 'cancelled' WHERE status IN ('reserved', 'waitlist', 'offered')");
+
+            // Cancel only "Today's" or "Yesterday's" leftover bookings that weren't fulfilled
+            db.run("UPDATE bookings SET status = 'cancelled' WHERE status IN ('reserved', 'waitlist', 'offered') AND date <= ?", [targetDateStr]);
 
             if (now.getDay() === 0) {
                 db.run("UPDATE users SET graceUsedWeek = 0");
