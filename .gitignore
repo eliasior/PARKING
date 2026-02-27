@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Database
+server/parkiq.db
+*.db-journal
+
+# Environment
+.env
+secret.key
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Gemini/Antigravity artifacts (internal)
+.gemini/
+.agents/
+brain/

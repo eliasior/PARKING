@@ -66,6 +66,21 @@ async function checkAuth() {
     return true;
 }
 
+document.addEventListener('DOMContentLoaded', () => {
+    // Navigation handling
+    document.querySelectorAll('.nav-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const viewName = tab.getAttribute('data-view');
+            if (viewName) {
+                switchView(viewName);
+                if (window.innerWidth <= 992) {
+                    toggleMenu(false);
+                }
+            }
+        });
+    });
+});
+
 async function doLogin() {
     const user = document.getElementById('loginUsername').value.trim();
     const pass = document.getElementById('loginPassword').value.trim();
@@ -107,8 +122,6 @@ async function doLogin() {
 
         init(); // Continue initialization
         document.getElementById('empName').textContent = data.user.name;
-
-        init(); // Continue initialization
     } catch (err) {
         errorEl.textContent = err.message;
         errorEl.style.display = 'block';
@@ -405,6 +418,27 @@ function applyPenalty(user) {
         user.banEnds = Date.now() + 48 * 3600000;
         addNotif('error', '🚫 הושעית ל-48 שעות', `אי הגעה שלישית. ההרשמה הושעתה ל-48 שעות.`);
         showToast('error', '🚫 השעיית מערכת', `${user.name} הושעה מניהול חניות ל-48 שעות.`);
+    }
+}
+
+async function cancelBookingById(bookingId) {
+    if (!confirm('האם אתה בטוח שברצונך לבטל הזמנה זו?')) return;
+
+    try {
+        const token = localStorage.getItem('parkiq_token');
+        const res = await fetch(`${API_URL}/bookings/${bookingId}/cancel`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!res.ok) {
+            const errData = await res.json();
+            throw new Error(errData.error || 'שגיאת ביטול ההזמנה');
+        }
+
+        showToast('info', 'בוטל בהצלחה', 'ההזמנה בוטלה והמערכת עודכנה.');
+    } catch (err) {
+        showToast('error', 'שגיאה בביטול', err.message);
     }
 }
 
@@ -737,7 +771,8 @@ function renderCarpoolTags(containerId, ids, removeFn) {
 }
 
 // ── Admin Actions ──────────────────────────────────────────────
-async function adminCreateUser() {
+async function adminCreateUser(e) {
+    if (e) e.preventDefault();
     const id = document.getElementById('newUserId').value.trim();
     const name = document.getElementById('newUserName').value.trim();
     const email = document.getElementById('newUserEmail').value.trim();
@@ -751,10 +786,12 @@ async function adminCreateUser() {
         return;
     }
 
+    const btn = e ? e.target : null;
     try {
-        const btn = event.target;
-        btn.disabled = true;
-        btn.textContent = 'יוצר...';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'יוצר...';
+        }
 
         const token = localStorage.getItem('parkiq_token');
         const res = await fetch(`${API_URL}/users`, {
@@ -766,28 +803,87 @@ async function adminCreateUser() {
             body: JSON.stringify({ id, name, email, password: pass || '123456', tier: parseInt(tier), role, isEV })
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.error || 'שגיאה בשרת');
 
         showToast('success', '✅ משתמש נוצר', `משתמש ${name} נוסף בהצלחה.`);
 
-        document.getElementById('newUserId').value = '';
-        document.getElementById('newUserName').value = '';
-        document.getElementById('newUserEmail').value = '';
-        document.getElementById('newUserPass').value = '';
-        document.getElementById('newUserEV').checked = false;
-        document.getElementById('newUserEV').nextElementSibling.classList.remove('on');
+        // Clear fields
+        ['newUserId', 'newUserName', 'newUserEmail', 'newUserPass'].forEach(f => {
+            const el = document.getElementById(f);
+            if (el) el.value = '';
+        });
+        const ev = document.getElementById('newUserEV');
+        if (ev) {
+            ev.checked = false;
+            // if (ev.nextElementSibling) ev.nextElementSibling.classList.remove('on');
+        }
 
         await fetchBackendState(token);
         renderAll();
 
     } catch (err) {
+        console.error('User creation error:', err);
         showToast('error', 'שגיאה ביצירת משתמש', err.message);
     } finally {
-        const btn = event?.target;
         if (btn) {
             btn.disabled = false;
             btn.textContent = 'צור משתמש חדש';
         }
+    }
+}
+
+function openEditUserModal(userId) {
+    const user = USERS.find(u => u.id === userId);
+    if (!user) return;
+
+    document.getElementById('editUserId').value = user.id;
+    document.getElementById('editUserName').value = user.name;
+    document.getElementById('editUserEmail').value = user.email || '';
+    document.getElementById('editUserTier').value = user.tier;
+    document.getElementById('editUserRole').value = user.role || 'user';
+    document.getElementById('editUserEV').checked = !!user.isEV;
+
+    openModal('editUserModal');
+}
+
+async function adminUpdateUser(e) {
+    if (e) e.preventDefault();
+    const id = document.getElementById('editUserId').value;
+    const name = document.getElementById('editUserName').value.trim();
+    const email = document.getElementById('editUserEmail').value.trim();
+    const tier = document.getElementById('editUserTier').value;
+    const role = document.getElementById('editUserRole').value;
+    const isEV = document.getElementById('editUserEV').checked;
+
+    const btn = document.getElementById('saveUserBtn');
+    try {
+        btn.disabled = true;
+        btn.textContent = 'שומר...';
+
+        const token = localStorage.getItem('parkiq_token');
+        const res = await fetch(`${API_URL}/users/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ name, email, tier: parseInt(tier), role, isEV })
+        });
+
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error || 'שגיאה בעדכון משתמש');
+        }
+
+        showToast('success', '✅ עודכן', `המשתמש ${name} עודכן בהצלחה.`);
+        closeModal('editUserModal');
+        await fetchBackendState(token);
+        renderAll();
+    } catch (err) {
+        showToast('error', 'שגיאה', err.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'שמור שינויים';
     }
 }
 

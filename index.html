@@ -18,6 +18,8 @@
   <div class="bg-orb bg-orb-1"></div>
   <div class="bg-orb bg-orb-2"></div>
   <div class="bg-orb bg-orb-3"></div>
+  <!-- Animated Orbs Background -->
+  <canvas id="ripple-canvas" style="position:fixed; inset:0; z-index:-1; pointer-events:none;"></canvas>
 
   <div id="app">
     <!-- ── Login Overlay ── -->
@@ -135,6 +137,16 @@
         <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));"
           id="profileMetricsGrid">
           <!-- populated by JS -->
+        </div>
+
+        <div class="card mt-16">
+          <div class="card-header">
+            <span class="card-title">הזמנות עתידיות</span>
+            <span class="card-icon">📅</span>
+          </div>
+          <div id="futureBookingsList" class="notif-list" style="max-height: 300px; overflow-y: auto;">
+            <!-- populated by JS -->
+          </div>
         </div>
       </div>
 
@@ -591,7 +603,7 @@
                 <span class="toggle-label">רכב חשמלי (EV)</span>
               </label>
             </div>
-            <button class="btn btn-success mt-12 w-full" onclick="adminCreateUser()">צור משתמש חדש</button>
+            <button class="btn btn-success mt-12 w-full" onclick="adminCreateUser(event)">צור משתמש חדש</button>
           </div>
 
           <div class="table-wrap">
@@ -834,6 +846,58 @@
     </div>
   </div>
 
+  <!-- ── User Edit Modal (Admin) ── -->
+  <div id="editUserModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">עריכת משתמש</h3>
+        <button class="btn-close" onclick="closeModal('editUserModal')">×</button>
+      </div>
+      <form id="editUserForm" onsubmit="adminUpdateUser(event)">
+        <input type="hidden" id="editUserId">
+        <div class="form-group">
+          <label>שם מלא</label>
+          <input type="text" id="editUserName" required>
+        </div>
+        <div class="form-group">
+          <label>אימייל</label>
+          <input type="email" id="editUserEmail" required>
+        </div>
+        <div class="grid-2 gap-16">
+          <div class="form-group">
+            <label>דרגת תעדוף (1-5)</label>
+            <select id="editUserTier">
+              <option value="1">Tier 1</option>
+              <option value="2">Tier 2</option>
+              <option value="3">Tier 3</option>
+              <option value="4">Tier 4</option>
+              <option value="5">Tier 5</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>תפקיד</label>
+            <select id="editUserRole">
+              <option value="user">עובד</option>
+              <option value="admin">מנהל</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group flex-between"
+          style="display:flex; justify-content:space-between; align-items:center; margin-top:12px;">
+          <label>רכב חשמלי (EV)</label>
+          <label class="switch">
+            <input type="checkbox" id="editUserEV">
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="modal-footer mt-16">
+          <button type="button" class="btn btn-ghost" onclick="closeModal('editUserModal')">ביטול</button>
+          <button type="submit" class="btn btn-primary" id="saveUserBtn">שמור שינויים</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Third-party library for Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <!-- Chart.js -->
@@ -841,6 +905,7 @@
   <!-- HTML5 QR Code Scanner -->
   <script src="https://unpkg.com/html5-qrcode"></script>
 
+  <script src="background.js"></script>
   <script src="app.js"></script>
   <script src="render.js"></script>
   <script>

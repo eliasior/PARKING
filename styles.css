@@ -3,9 +3,9 @@
 :root {
   --bg-primary: #050812;
   --bg-secondary: #0a0f1e;
-  --bg-card: rgba(13, 18, 32, 0.6);
-  --bg-glass: rgba(255, 255, 255, 0.03);
-  --bg-glass-hover: rgba(255, 255, 255, 0.07);
+  --bg-card: rgba(13, 18, 32, 0.45);
+  --bg-glass: rgba(255, 255, 255, 0.02);
+  --bg-glass-hover: rgba(255, 255, 255, 0.05);
   --accent-cyan: #00d4ff;
   --accent-blue: #0066ff;
   --accent-purple: #9333ea;
@@ -212,6 +212,7 @@ body {
   letter-spacing: -0.5px;
   background: var(--gradient-main);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -576,8 +577,25 @@ body {
   }
 }
 
+@keyframes gradualBlur {
+  0% {
+    filter: blur(8px);
+    opacity: 0;
+  }
+
+  100% {
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+.gradual-blur {
+  animation: gradualBlur 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 .page-header {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+  animation: gradualBlur 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .page-title {
@@ -590,6 +608,7 @@ body {
 .page-title span {
   background: var(--gradient-main);
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
@@ -623,40 +642,28 @@ body {
 /* ── Phenomenal Cards ── */
 .card {
   background: var(--bg-card);
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius-lg);
   padding: 28px;
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
   overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-}
-
-.card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: radial-gradient(800px circle at var(--mouse-x, 50%) var(--mouse-y, 50%), rgba(255, 255, 255, 0.1), transparent 40%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  transition: opacity 0.4s;
-  pointer-events: none;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
 }
 
 .card:hover {
-  transform: translateY(-4px) scale(1.005);
-  box-shadow: var(--shadow-card);
-  border-color: rgba(255, 255, 255, 0.1);
+  transform: translateY(-6px) scale(1.01);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
-.card:hover::before {
-  opacity: 1;
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 8px;
 }
 
 .card-header {
@@ -719,31 +726,28 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 12px 24px;
+  gap: 10px;
+  padding: 14px 28px;
   border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 700;
-  font-family: 'Inter', sans-serif;
+  font-family: inherit;
   cursor: pointer;
   border: none;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   white-space: nowrap;
   position: relative;
   overflow: hidden;
 }
 
-.btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(rgba(255, 255, 255, 0.2), transparent);
-  opacity: 0;
-  transition: opacity 0.3s;
+.btn:hover {
+  transform: translateY(-4px);
+  filter: brightness(1.1);
 }
 
-.btn:hover::after {
-  opacity: 1;
+.btn:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 4px;
 }
 
 .btn:active {

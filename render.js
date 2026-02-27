@@ -193,24 +193,42 @@ function renderAvailabilityPreview() {
 }
 
 function renderPriorityBreakdown() {
-    const el = document.getElementById('priorityBreakdown');
-    if (!el) return;
+    const container = document.getElementById('priorityBreakdown');
+    if (!container) return;
     const user = getUser();
-    const cp = getCarpoolTagIds().length;
-    const score = calcPriority(user, cp);
-    el.innerHTML =
-        '<div style="font-family:monospace;background:var(--bg-glass);border:1px solid var(--border);border-radius:var(--radius-md);padding:14px;margin-bottom:14px;font-size:13px;line-height:1.8">' +
-        '<span style="color:var(--accent-cyan)">P(' + user.name.split(' ')[0] + ') = </span>' +
-        '<span style="color:var(--accent-green)">' + (1.0 * user.tier).toFixed(1) + '</span> + ' +
-        '<span style="color:#a78bfa">' + (3.0 * cp).toFixed(1) + '</span> - ' +
-        '<span style="color:var(--accent-red)">' + (2.5 * user.noShows).toFixed(1) + '</span> + ' +
-        '<span style="color:var(--accent-yellow)">' + (0.8 * user.waitHistory).toFixed(1) + '</span>' +
-        ' = <strong style="color:#fff;font-size:16px"> ' + score.toFixed(2) + '</strong>' +
-        '</div>' +
-        '<div class="info-row"><span class="label">דרגת ארגון (' + user.tier + ' x 1.0)</span><span class="value bold" style="color:var(--accent-green)">+' + (1.0 * user.tier).toFixed(1) + '</span></div>' +
-        '<div class="info-row"><span class="label">קארפול (' + cp + ' x 3.0)</span><span class="value bold" style="color:#a78bfa">+' + (3.0 * cp).toFixed(1) + '</span></div>' +
-        '<div class="info-row"><span class="label">אי-הגעה (' + user.noShows + ' x 2.5)</span><span class="value bold" style="color:var(--accent-red)">-' + (2.5 * user.noShows).toFixed(1) + '</span></div>' +
-        '<div class="info-row"><span class="label">היסטוריית המתנה (' + user.waitHistory + 'ימים x 0.8)</span><span class="value bold" style="color:var(--accent-yellow)">+' + (0.8 * user.waitHistory).toFixed(1) + '</span></div>';
+    if (!user) return;
+
+    // Simulate carpool count from current booking form if in booking view
+    const cpTags = getCarpoolTagIds ? getCarpoolTagIds() : [];
+    const cpCount = cpTags.length;
+    const score = calcPriority(user, cpCount);
+
+    let html = `
+        <div class="priority-total" style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-glass); border:1px solid var(--border); border-radius:var(--radius-md); padding:16px; margin-bottom:16px;">
+            <span class="label" style="font-size:14px; font-weight:600;">ציון תעדוף נוכחי:</span>
+            <span class="value" style="font-size:24px; font-weight:900; color:var(--accent-cyan);">${score.toFixed(1)}</span>
+        </div>
+        <div class="priority-list" style="display:flex; flex-direction:column; gap:12px;">
+            <div class="info-row" style="display:flex; justify-content:space-between; font-size:13px;">
+                <span class="label">📦 דרגת עובד (Tier ${user.tier})</span>
+                <span class="value" style="font-weight:700;">+${(user.tier * 1.0).toFixed(1)}</span>
+            </div>
+            <div class="info-row" style="display:flex; justify-content:space-between; font-size:13px;">
+                <span class="label">🚗 בונוס קארפול (${cpCount} שותפים)</span>
+                <span class="value" style="font-weight:700; color:var(--accent-green);">+${(cpCount * 3.0).toFixed(1)}</span>
+            </div>
+            <div class="info-row" style="display:flex; justify-content:space-between; font-size:13px;">
+                <span class="label">⚠️ קנס אי-הגעה (${user.noShows || 0} פעמים)</span>
+                <span class="value" style="font-weight:700; color:var(--accent-red);">-${((user.noShows || 0) * 2.5).toFixed(1)}</span>
+            </div>
+            <div class="info-row" style="display:flex; justify-content:space-between; font-size:13px;">
+                <span class="label">⏳ היסטוריית המתנה</span>
+                <span class="value" style="font-weight:700; color:var(--accent-yellow);">+${((user.waitHistory || 0) * 0.8).toFixed(1)}</span>
+            </div>
+        </div>
+        <p class="text-xs mt-12" style="color:var(--text-muted); text-align:center;">הציון משתנה בזמן אמת לפי בחירותיך בטופס.</p>
+    `;
+    container.innerHTML = html;
 }
 
 /* ── Check-In View ─────────────────────────────────────────── */
@@ -496,8 +514,8 @@ function renderUserTable() {
             '<td>' + nsHtml + '</td>' +
             '<td>' + statusHtml + '</td>' +
             '<td><div style="display:flex;gap:6px">' +
-            '<button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="adminClearPenalty(\'' + u.id + '\')">נקה ענישה</button>' +
-            '<button class="btn btn-primary" style="padding:5px 10px;font-size:11px" onclick="adminForceBook(\'' + u.id + '\')">הזמנת מנהל</button>' +
+            '<button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="openEditUserModal(\'' + u.id + '\')">ערוך</button>' +
+            '<button class="btn btn-primary" style="padding:5px 10px;font-size:11px" onclick="adminForceBook(\'' + u.id + '\')">הזמנה</button>' +
             '</div></td></tr>';
     }).join('');
 }
@@ -648,67 +666,81 @@ function renderNoShowTable() {
 }
 
 function renderProfile() {
-    const el = document.getElementById('profileMetricsGrid');
-    if (!el) return;
     const user = getUser();
     if (!user) return;
 
-    // Get 5 most recent bookings for the user
-    const userHistory = BOOKINGS
-        .filter(function (b) { return b.userId === user.id; })
-        .sort(function (a, b) { return b.createdAt - a.createdAt; })
-        .slice(0, 5);
+    const grid = document.getElementById('profileMetricsGrid');
+    if (grid) {
+        grid.innerHTML = `
+            <div class="card stat-card">
+                <div class="text-muted text-xs uppercase mb-4">דירוג ארגוני</div>
+                <div class="text-2xl bold color-cyan">Tier ${user.tier}</div>
+            </div>
+            <div class="card stat-card">
+                <div class="text-muted text-xs uppercase mb-4">נקודות ECO</div>
+                <div class="text-2xl bold color-green">${user.ecoPoints || 0} 🌱</div>
+            </div>
+            <div class="card stat-card">
+                <div class="text-muted text-xs uppercase mb-4">אי-הגעה (30 יום)</div>
+                <div class="text-2xl bold color-red">${user.noShows || 0}</div>
+            </div>
+            <div class="card stat-card">
+                <div class="text-muted text-xs uppercase mb-4">ציון תעדוף בסיסי</div>
+                <div class="text-2xl bold color-yellow">${calcPriority(user).toFixed(1)}</div>
+            </div>
+        `;
+    }
 
-    let historyHtml = userHistory.map(function (b) {
-        let statusColor = 'var(--text-muted)';
-        let statusHebrew = b.status;
-        if (b.status === 'completed' || b.status === 'fulfilled' || b.status === 'occupied') {
-            statusColor = 'var(--accent-green)';
-            statusHebrew = 'מומשה';
-        }
-        if (b.status === 'cancelled') {
-            statusColor = 'var(--accent-red)';
-            statusHebrew = 'בוטלה';
-        }
-        if (b.status === 'reserved') statusHebrew = 'שמורה';
-        if (b.status === 'waitlist') statusHebrew = 'בהמתנה';
+    renderFutureBookings();
+}
 
-        return '<div style="padding: 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">' +
-            '<span style="font-weight: 500;">' + b.date + ' | ' + b.time + '</span>' +
-            '<span class="status-pill" style="color: ' + statusColor + '; border: 1px solid ' + statusColor + '; background: transparent;">' + statusHebrew + '</span>' +
-            '</div>';
-    }).join('');
+function renderFutureBookings() {
+    const list = document.getElementById('futureBookingsList');
+    if (!list) return;
 
-    if (!historyHtml) historyHtml = `
-        <div class="empty-state" style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
-            <div style="font-size: 40px; margin-bottom: 12px; opacity: 0.5;">📅</div>
-            <p style="font-size: 14px; font-weight: 500;">טרם בוצעו הזמנות</p>
-            <p style="font-size: 12px; opacity: 0.7; margin-top: 4px;">ההיסטוריה שלך תופיע כאן לאחר שתשתמש בשירות.</p>
+    const user = getUser();
+    const todayStr = today();
+    // Filter for bookings starting from today (future) that are not cancelled
+    const futures = BOOKINGS.filter(b => b.userId === user.id && b.date >= todayStr && b.status !== 'cancelled');
+
+    if (futures.length === 0) {
+        list.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted);">אין הזמנות עתידיות.</div>`;
+        return;
+    }
+
+    list.innerHTML = futures.map(b => `
+        <div class="notif-item" style="display:flex; align-items:center; gap:12px; padding:12px; border-bottom:1px solid var(--border);">
+            <div class="notif-icon" style="font-size:20px;">📅</div>
+            <div style="flex:1">
+                <div style="font-weight:600; font-size:14px;">תאריך: ${b.date}</div>
+                <div class="text-xs color-muted" style="margin-top:2px;">
+                    שעה: ${b.time} | סטטוס: <span class="badge badge-${getStatusClass(b.status)}" style="font-size:10px; padding:2px 6px;">${translateStatus(b.status)}</span>
+                </div>
+            </div>
+            ${(b.status === 'waitlist' || b.status === 'reserved' || b.status === 'offered') ?
+            `<button class="btn btn-ghost btn-xs" style="color:var(--accent-red); font-size:11px;" onclick="cancelBookingById('${b.id}')">ביטול</button>` : ''}
         </div>
-    `;
+    `).join('');
+}
 
-    el.innerHTML =
-        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
-        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">Eco-Points 🌱</div>' +
-        '<div class="stat-value" style="color:var(--accent-green); font-size: 2.5rem;">' + (user.ecoPoints || 0) + '</div>' +
-        '<div class="stat-desc" style="margin-top: 8px;">מדד אקולוגי למניעת זיהום אוויר ושמירה על סדר</div>' +
-        '</div>' +
-        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
-        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">עבירות (No-shows) ⚠️</div>' +
-        '<div class="stat-value" style="color:' + (user.noShows > 0 ? 'var(--accent-red)' : 'var(--accent-cyan)') + '; font-size: 2.5rem;">' + (user.noShows || 0) + '</div>' +
-        '<div class="stat-desc" style="margin-top: 8px;">אי-הגעה לאחר הזמנה ללא ביטול בזמן</div>' +
-        '</div>' +
-        '<div class="stat-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px;">' +
-        '<div class="stat-title" style="font-size: 1.1rem; margin-bottom: 8px;">ימי חסד (Grace) ⏳</div>' +
-        '<div class="stat-value" style="font-size: 2.5rem;">' + (user.graceUsedWeek || 0) + ' <span style="font-size: 1.5rem; color: var(--text-muted);">/ 2</span></div>' +
-        '<div class="stat-desc" style="margin-top: 8px;">ניצולת חסד שבועית לביטולי רגע-אחרון</div>' +
-        '</div>' +
-        '<div class="stat-card" style="grid-column: 1 / -1; margin-top: 16px;">' +
-        '<div class="stat-title" style="margin-bottom: 16px; font-size: 1.1rem;">היסטוריית הזמנות 📋</div>' +
-        '<div style="background: var(--surface-hover); border-radius: 8px; overflow: hidden; border: 1px solid var(--border);">' +
-        historyHtml +
-        '</div>' +
-        '</div>';
+function getStatusClass(status) {
+    if (status === 'fulfilled' || status === 'completed' || status === 'occupied') return 'success';
+    if (status === 'waitlist') return 'waitlist';
+    if (status === 'reserved' || status === 'offered') return 'reserved';
+    return 'danger';
+}
+
+function translateStatus(status) {
+    const map = {
+        'reserved': 'שמורה',
+        'waitlist': 'ברשימה',
+        'offered': 'הצעה',
+        'occupied': 'תפוסה',
+        'completed': 'הושלם',
+        'cancelled': 'בוטלה',
+        'fulfilled': 'מומשה'
+    };
+    return map[status] || status;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -718,7 +750,8 @@ function init() {
     initTheme(); // Phase 2: Intialize Light/Dark Mode
     var d = today();
 
-    // Seed demo data — some spots occupied/reserved
+    // Removed legacy seeding logic to prevent crashes with dynamic backend data
+    /*
     var s3 = SPOTS[7]; s3.state = 'reserved'; s3.userId = 'u2'; s3.reservedAt = Date.now() - 5 * 60000;
     BOOKINGS.push({ id: 'B_d1', userId: 'u2', date: d, time: '08:30', spotId: s3.id, status: 'reserved', carpoolWith: [], score: calcPriority(USERS[1]), noShow: false, createdAt: Date.now() });
 
@@ -734,6 +767,7 @@ function init() {
     WAITLIST.sort(function (a, b) { return b.score - a.score; });
     BOOKINGS.push({ id: 'B_d4', userId: 'u5', date: d, time: '09:00', spotId: null, status: 'waitlist', carpoolWith: [], score: WAITLIST[0].score, noShow: false, createdAt: Date.now() });
     BOOKINGS.push({ id: 'B_d5', userId: 'u7', date: d, time: '09:30', spotId: null, status: 'waitlist', carpoolWith: [], score: WAITLIST[1].score, noShow: false, createdAt: Date.now() });
+    */
 
     // Nav tab click events
     document.querySelectorAll('.nav-tab').forEach(function (tab) {
@@ -833,6 +867,45 @@ document.addEventListener('DOMContentLoaded', async function () {
 let occChartInstance = null;
 let noshowChartInstance = null;
 
+function renderPriorityBreakdown() {
+    const container = document.getElementById('priorityBreakdown');
+    if (!container) return;
+    const user = getUser();
+    if (!user) return;
+
+    // Simulate carpool count from current booking form if in booking view
+    const cpTags = getCarpoolTagIds ? getCarpoolTagIds() : [];
+    const cpCount = cpTags.length;
+    const score = calcPriority(user, cpCount);
+
+    let html = `
+        <div class="priority-total">
+            <span class="label">ציון נוכחי:</span>
+            <span class="value">${score.toFixed(1)}</span>
+        </div>
+        <div class="divider"></div>
+        <div class="priority-list">
+            <div class="info-row">
+                <span class="label">📦 דרגת עובד (Tier ${user.tier})</span>
+                <span class="value">+${(user.tier * 1.0).toFixed(1)}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">🚗 בונוס קארפול (${cpCount} שותפים)</span>
+                <span class="value" style="color:var(--accent-green)">+${(cpCount * 3.0).toFixed(1)}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">⚠️ קנס אי-הגעה (${user.noShows || 0} פעמים)</span>
+                <span class="value" style="color:var(--accent-red)">-${((user.noShows || 0) * 2.5).toFixed(1)}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">⏳ היסטוריית המתנה</span>
+                <span class="value">+${((user.waitHistory || 0) * 0.8).toFixed(1)}</span>
+            </div>
+        </div>
+        <p class="text-xs mt-12" style="color:var(--text-muted); text-align:center;">הציון משתנה בזמן אמת לפי בחירותיך בטופס.</p>
+    `;
+    container.innerHTML = html;
+}
 function renderAnalytics() {
     // Top Stats
     const statsEl = document.getElementById('analyticsStats');
